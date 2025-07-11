@@ -1,0 +1,39 @@
+# === Core Utilities ===
+pandas>=2.0
+numpy
+python-dotenv
+
+# === FastAPI Backend ===
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+
+# === CSV / File Handling ===
+openpyxl
+
+# === LangChain + Groq AI ===
+langchain
+langchain-community
+langchain-core
+groq  # Groq Python SDK
+tiktoken
+httpx
+
+# === Sustainability & ML (optional for future enhancement) ===
+scikit-learn
+matplotlib
+seaborn
+
+# === Streamlit Frontend ===
+streamlit
+streamlit-aggrid
+
+# === Dev & Utilities ===
+ipython
+rich
+jupyterlab
+
+# === Optional: Caching & Performance ===
+joblib
+fastparquet
