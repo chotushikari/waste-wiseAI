@@ -378,164 +378,198 @@ import pandas as pd
 import numpy as np
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import io
 import argparse
-from services.loader import load_inventory, save_inventory, load_action_log
+import random
+
+from services.loader import load_inventory, save_inventory
 from services.logger import batch_log_action, flush_logs_to_file, log_full_action_context
 from core.waste_intelligence import enrich_inventory
 from core.sustainability import enrich_sustainability
 from core.decision_engine import generate_daily_decisions, summarize_decisions
 from services.persistence import save_dual, save_sustainability_log
 
-# Configure logging
+# === Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')  # Unicode fix
 
-# Handle Unicode output (Windows-safe)
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# === Global config
+IMPORTANT_ACTIONS = {
+    "DONATE", "RETURN to Supplier", "Strategic Discount - Tier 1", "Strategic Discount - Tier 2"
+}
+current_date = datetime.now().date()
 
-IMPORTANT_ACTIONS = ["DONATE", "RETURN to Supplier", "MARKDOWN -10%", "MARKDOWN -30%"]
 
-def log_spoilage(df, expired_mask, verbose):
-    spoilage_df = df[expired_mask].copy()
-    df.loc[expired_mask, 'current_stock'] = 0
-    spoilage_logs = pd.DataFrame({
+# === ACTION LOG HELPERS ===
+
+def log_spoilage(df, mask, verbose=True):
+    spoilage_df = df[mask].copy()
+    df.loc[mask, 'current_stock'] = 0
+    logs = pd.DataFrame({
         "item_id": spoilage_df['item_id'],
         "action_type": "spoilage",
         "quantity": spoilage_df['current_stock'],
         "reason": "Expired – Auto Spoil",
         "value": (spoilage_df['current_stock'] * spoilage_df['base_price']).round(2)
     }).to_dict(orient="records")
-    batch_log_action(spoilage_logs)
+    batch_log_action(logs)
     if verbose:
-        logger.info(f"Spoilage triggered for {expired_mask.sum()} items")
+        logger.info(f"☠️ Spoilage: {mask.sum()} items expired")
 
-def log_sales(df, sales_mask, verbose):
-    sale_logs = pd.DataFrame({
-        "item_id": df.loc[sales_mask, 'item_id'],
+
+def log_sales(sales_data):
+    if not sales_data:
+        return
+    logs = pd.DataFrame({
+        "item_id": [s['item_id'] for s in sales_data],
         "action_type": "sale",
-        "quantity": sales_mask[sales_mask],
+        "quantity": [s['quantity'] for s in sales_data],
         "reason": "Elasticity-based Sale Simulation",
-        "value": (sales_mask[sales_mask] * df.loc[sales_mask, 'dynamic_price']).round(2)
+        "value": [round(s['quantity'] * s['price'], 2) for s in sales_data]
     }).to_dict(orient="records")
-    batch_log_action(sale_logs)
+    batch_log_action(logs)
 
-def log_restock(df, restock_mask, verbose):
-    df.loc[restock_mask, 'current_stock'] += df.loc[restock_mask, 'initial_stock']
-    restock_logs = pd.DataFrame({
-        "item_id": df.loc[restock_mask, 'item_id'],
+
+def log_restock(df, mask, verbose=True):
+    df.loc[mask, 'current_stock'] += df.loc[mask, 'initial_stock']
+    logs = pd.DataFrame({
+        "item_id": df.loc[mask, 'item_id'],
         "action_type": "restock",
-        "quantity": df.loc[restock_mask, 'initial_stock'],
+        "quantity": df.loc[mask, 'initial_stock'],
         "reason": "Scheduled Restock",
         "value": 0.0
     }).to_dict(orient="records")
-    batch_log_action(restock_logs)
+    batch_log_action(logs)
+    if verbose:
+        logger.info(f"📦 Restocked: {mask.sum()} items")
+
+
+# === DAILY SIMULATION ===
 
 def simulate_day(verbose=True):
+    global current_date
     if verbose:
-        logger.info("\n⚙️ Starting simulation...")
+        logger.info("\n⚙️ Simulating Day")
+
     try:
         df = load_inventory()
-        if verbose:
-            logger.info(f"✅ Loaded inventory: {df.shape}")
-
-        # === 1. Shelf Life Reduction ===
         df['days_remaining'] = np.maximum(df['days_remaining'] - 1, 0)
-        if verbose:
-            logger.info("✅ Updated shelf life")
 
-        # === 2. Spoilage ===
-        expired_mask = (df['days_remaining'] <= 0) & (df['current_stock'] > 0)
-        if expired_mask.any():
-            log_spoilage(df, expired_mask, verbose)
-        elif verbose:
-            logger.info("✅ No spoilage triggered")
+        # === Spoilage
+        spoil_mask = (df['days_remaining'] <= 0) & (df['current_stock'] > 0)
+        if spoil_mask.any():
+            log_spoilage(df, spoil_mask, verbose)
 
-        # === 3. Dynamic Pricing ===
-        urgency = df['days_remaining'] / df['shelf_life_days'].replace(0, 1)
-        discount = 1 - np.minimum(0.5, 0.1 + (0.3 - np.clip(urgency, None, 0.3)))
-        df['dynamic_price'] = np.where(
-            (urgency <= 0.3) & (df['current_stock'] > 0),
-            (df['base_price'] * discount).round(2),
-            df['base_price']
-        )
+        # === Dynamic Pricing + Sales Simulation
+        sales_data = []
+        is_weekend = current_date.weekday() in [5, 6]
+        multiplier = 1.2 if is_weekend else 1.0
 
-        # === 4. Sales Simulation ===
-        price_diff = (df['base_price'] - df['dynamic_price']) / df['base_price'].replace(0, 1)
-        adj_demand = (df['predicted_daily_sales'] * (1 + df['elasticity'] * price_diff)).fillna(0).astype(int)
-        simulated_sales = np.minimum(adj_demand, df['current_stock'])
-        df['current_stock'] -= simulated_sales
-        sales_mask = simulated_sales > 0
-        if sales_mask.any():
-            log_sales(df, sales_mask, verbose)
+        for idx, row in df.iterrows():
+            base, elasticity, pred_sales = row['base_price'], row['elasticity'], row['predicted_daily_sales']
+            stock, days_rem = row['current_stock'], row['days_remaining']
+            floor = max(base - elasticity, 0.01)
+            base_demand = pred_sales * multiplier
 
-        # === 5. Restocking ===
-        restock_mask = df['days_until_restock'] == 0
+            # Price elasticity factor
+            elasticity_boost = (1 - (row['dynamic_price'] - base) / base) * elasticity if base > 0 else 0
+            sales = max(1, int(base_demand + random.uniform(-5, 5) + elasticity_boost * base_demand))
+            sales = min(sales, stock)
+            df.at[idx, 'current_stock'] -= sales
+
+            if sales > 0:
+                sales_data.append({
+                    "item_id": row['item_id'],
+                    "quantity": sales,
+                    "price": row['dynamic_price']
+                })
+
+            # Recalculate dynamic price
+            if pred_sales > 0 and days_rem > 0:
+                predicted_total = pred_sales * days_rem
+                stock_ratio = stock / predicted_total if predicted_total > 0 else 0
+                if stock_ratio > 1.2:
+                    discount = elasticity * 0.8
+                    new_price = round(max(base - discount, floor), 2)
+                else:
+                    new_price = base
+            else:
+                new_price = base
+
+            if days_rem <= 2 and stock > 0:
+                new_price = round(max(new_price * 0.9, base * 0.5), 2)
+
+            df.at[idx, 'dynamic_price'] = new_price
+
+        log_sales(sales_data)
+
+        # === Restocking
+        restock_mask = df['days_until_restock'] <= 0
         if restock_mask.any():
-            log_restock(df, restock_mask, verbose)
-        df['days_until_restock'] = np.where(
-            restock_mask,
-            df['restock_frequency_days'],
-            df['days_until_restock'] - 1
-        )
+            for idx in df[restock_mask].index:
+                delay = random.choice([0, 1, 2])
+                df.at[idx, 'days_until_restock'] = df.at[idx, 'restock_frequency_days'] + delay
+        else:
+            df['days_until_restock'] -= 1
+        log_restock(df, restock_mask, verbose)
 
-        # === 6. Intelligence & AI Decisions ===
+        # === AI Intelligence
         df = enrich_inventory(df)
         df = enrich_sustainability(df)
         df = generate_daily_decisions(df)
-
-        # Save updated inventory (in both CSV and Parquet)
         save_dual(df, base_filename="inventory_updated")
-        # Save sustainability impact log for the day
         save_sustainability_log(df)
+
+        # === Full AI Context Log (CSV + Parquet)
         log_full_action_context(df)
-        if verbose:
-            logger.info("✅ AI intelligence, sustainability & actions done")
 
-        # === 7. Log Recommended Actions ===
-        action_loggable = df[df['recommended_action'].isin(IMPORTANT_ACTIONS)]
-        if not action_loggable.empty:
-            decision_logs = pd.DataFrame({
-                "item_id": action_loggable['item_id'],
-                "action_type": action_loggable['recommended_action'],
-                "quantity": action_loggable['forecasted_waste_units'].fillna(0).astype(int),
-                "reason": action_loggable['tactical_note'],
-                "value": action_loggable['forecasted_waste_value'].fillna(0).round(2)
+        # === Log Only Recommended Actions
+        ai_loggable = df[df['recommended_action'].isin(IMPORTANT_ACTIONS)]
+        if not ai_loggable.empty:
+            logs = pd.DataFrame({
+                "item_id": ai_loggable['item_id'],
+                "action_type": ai_loggable['recommended_action'],
+                "quantity": ai_loggable['forecasted_waste_units'].fillna(0).astype(int),
+                "reason": ai_loggable['tactical_note'],
+                "value": ai_loggable['forecasted_waste_value'].fillna(0).round(2)
             }).to_dict(orient="records")
-            batch_log_action(decision_logs)
-            if verbose:
-                logger.info(f"✅ Logged {len(decision_logs)} AI-driven action decisions.")
-        elif verbose:
-            logger.info("⚠️ No new AI-driven actions to log.")
+            batch_log_action(logs)
+            logger.info(f"🤖 AI Actions: {len(logs)} logged")
+        else:
+            logger.info("🤖 AI Actions: None today")
 
-        # === 8. Final Save ===
+        # === Final Save & Cleanup
         save_inventory(df)
         flush_logs_to_file()
-        if verbose:
-            logger.info("✅ Inventory saved & logs flushed")
+        current_date += timedelta(days=1)
 
         summary = summarize_decisions(df)
         return df, summary
 
     except Exception as e:
-        logger.error(f"Error during simulation: {e}")
+        logger.error(f"[❌ Simulation Error] {e}")
         raise
 
+
+# === SIMULATE MULTIPLE DAYS ===
+
 def simulate_n_days(n):
-    logger.info(f"\n📆 Simulating for {n} day(s)...")
+    logger.info(f"\n📅 Running {n} day(s) simulation")
     for day in range(1, n + 1):
-        logger.info(f"\n🔁 Day {day}:")
+        logger.info(f"\n🔁 Day {day}")
         start = time.time()
         try:
             df, summary = simulate_day(verbose=True)
-            logger.info("\n📊 Summary Snapshot:")
+            logger.info("📊 Daily Summary:")
             for k, v in summary.items():
-                logger.info(f"  - {k}: {v}")
-            logger.info(f"⏱️ Total Time Taken: {round(time.time() - start, 2)} seconds")
+                logger.info(f"   - {k}: {v}")
+            logger.info(f"✅ Done in {round(time.time() - start, 2)}s")
         except Exception as e:
-            logger.error(f"Error simulating day {day}: {e}")
+            logger.error(f"[❌ Day {day} Failed] {e}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

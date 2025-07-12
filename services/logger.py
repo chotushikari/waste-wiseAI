@@ -187,47 +187,56 @@
 #     }
 
 
-import csv
 import os
+import csv
 from datetime import datetime
 import pandas as pd
 from services.config import ACTION_LOG_CSV, ACTION_LOG_PARQUET
 
-# In-memory action queue
+# In-memory batch queue
 ACTION_LOG_QUEUE = []
 
-# Only log important events (skip low-value NO ACTION etc.)
-IMPORTANT_ACTIONS = {"spoilage", "sale", "restock", "DONATE", "RETURN to Supplier", "MARKDOWN -10%", "MARKDOWN -30%"}
-
+# Central action filter (import from config if defined there)
+IMPORTANT_ACTIONS = {
+    "spoilage", "sale", "restock",
+    "DONATE", "RETURN to Supplier",
+    "Strategic Discount - Tier 1", "Strategic Discount - Tier 2"
+}
 
 # === BASIC ACTION LOGGING ===
+
 def log_action(item_id, action_type, quantity, reason="", value=0.0):
+    """Log a single action if important."""
     if action_type not in IMPORTANT_ACTIONS:
         return
     ACTION_LOG_QUEUE.append({
         "timestamp": datetime.now().isoformat(),
-        "item_id": item_id,
+        "item_id": str(item_id),
         "action_type": action_type,
-        "quantity": quantity,
+        "quantity": int(quantity),
         "reason": reason,
-        "value": round(value, 2)
+        "value": round(float(value), 2)
     })
 
+
 def batch_log_action(entries: list[dict]):
+    """Log multiple actions at once, filter unimportant."""
     timestamp = datetime.now().isoformat()
     for entry in entries:
         if entry.get("action_type") not in IMPORTANT_ACTIONS:
             continue
         ACTION_LOG_QUEUE.append({
             "timestamp": timestamp,
-            "item_id": entry.get("item_id"),
+            "item_id": str(entry.get("item_id")),
             "action_type": entry.get("action_type"),
-            "quantity": entry.get("quantity", 0),
+            "quantity": int(entry.get("quantity", 0)),
             "reason": entry.get("reason", ""),
-            "value": round(entry.get("value", 0.0), 2)
+            "value": round(float(entry.get("value", 0.0)), 2)
         })
 
+
 def flush_logs_to_file():
+    """Flush queued actions to CSV log file."""
     if not ACTION_LOG_QUEUE:
         return
 
@@ -239,55 +248,77 @@ def flush_logs_to_file():
                 writer.writeheader()
             writer.writerows(ACTION_LOG_QUEUE)
     except Exception as e:
-        print(f"[❌ Logger Error] Failed to write batch log: {e}")
+        print(f"[❌ Logger Error] Failed to write log batch: {e}")
     finally:
         ACTION_LOG_QUEUE.clear()
 
 
-# === PARQUET FORMAT (Full AI Decision Logs for ML Training) ===
+# === FULL AI CONTEXT LOGGING FOR ML TRAINING ===
+
 def log_full_action_context(df, date=None):
+    """Logs full AI decision context for actions worth saving (CSV + Parquet)."""
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
 
-    # Filter for important actions
-    loggable = df[df['recommended_action'].isin(["DONATE", "RETURN to Supplier", "MARKDOWN -10%", "MARKDOWN -30%"])]
-
+    loggable = df[df['recommended_action'].isin(IMPORTANT_ACTIONS)].copy()
     if loggable.empty:
         return
 
     try:
-        # Select and copy the relevant columns
+        # Select relevant columns
         log_df = loggable[[
-            "item_id", "department", "current_stock", "days_remaining", "base_price", "dynamic_price",
+            "item_id", "current_stock", "days_remaining", "base_price", "dynamic_price",
             "forecasted_waste_units", "forecasted_waste_value", "predicted_daily_sales",
             "co2_saved_kg", "sustainability_score", "efficiency_ratio",
-            "recommended_action", "tactical_note", "risk_tag"
+            "recommended_action", "tactical_note", "risk_tag", "category", "department"
         ]].copy()
 
-        # Add the date column
+        # Derived fields
+        log_df["timestamp"] = datetime.now().isoformat()
+        log_df["action_type"] = log_df["recommended_action"]
+        log_df["quantity"] = log_df["forecasted_waste_units"]
+        log_df["reason"] = log_df["tactical_note"]
+        log_df["value"] = log_df["forecasted_waste_value"]
         log_df["date"] = date
 
-        # Append to existing logs if the Parquet file exists
-        if os.path.exists(ACTION_LOG_PARQUET):
-            existing = pd.read_parquet(ACTION_LOG_PARQUET)
-            log_df = pd.concat([existing, log_df], ignore_index=True)
+        # Final order
+        ordered_cols = [
+            "timestamp", "item_id", "action_type", "quantity", "reason", "value",
+            "current_stock", "days_remaining", "base_price", "dynamic_price",
+            "forecasted_waste_units", "forecasted_waste_value", "predicted_daily_sales",
+            "co2_saved_kg", "sustainability_score", "efficiency_ratio",
+            "risk_tag", "date", "category", "department"
+        ]
+        log_df = log_df[ordered_cols]
 
-        # Save to Parquet
-        log_df.to_parquet(ACTION_LOG_PARQUET, index=False)
+        # Safe typecasting
+        numeric_cols = log_df.select_dtypes(include=['float64', 'int64']).columns
+        for col in numeric_cols:
+            log_df[col] = pd.to_numeric(log_df[col], errors="coerce").fillna(0)
 
-        # Save to CSV
-        log_df.to_csv(ACTION_LOG_CSV, index=False)
+        # Load existing log if available
+        if os.path.exists(ACTION_LOG_CSV):
+            existing_df = pd.read_csv(ACTION_LOG_CSV, dtype=str)
+            combined_df = pd.concat([existing_df, log_df.astype(str)], ignore_index=True)
+        else:
+            combined_df = log_df.astype(str)
 
-        print(f"✅ Logged {len(log_df)} full-context AI actions to Parquet and CSV")
+        # Save both formats
+        combined_df.to_csv(ACTION_LOG_CSV, index=False)
+        combined_df.to_parquet(ACTION_LOG_PARQUET, index=False)
+
+        print(f"✅ Logged {len(log_df)} full-context AI actions to CSV and Parquet")
 
     except Exception as e:
-        print(f"[❌ Full Log Error] Failed to write AI log: {e}")
+        print(f"[❌ Full Log Error] Failed to log AI actions: {e}")
 
-def log_post_ai_action(row):
-    log_action(
-        item_id=row["item_id"],
-        action_type=row["recommended_action"],
-        quantity=row["forecasted_waste_units"],
-        reason=row["tactical_note"],
-        value=row["forecasted_waste_value"]
-    )
+def log_post_ai_action(item_id, action, quantity, reason, value):
+    log_entry = {
+        "item_id": item_id,
+        "action_type": action,
+        "quantity": quantity,
+        "reason": reason,
+        "value": round(value, 2)
+    }
+    batch_log_action([log_entry])
+    flush_logs_to_file() 

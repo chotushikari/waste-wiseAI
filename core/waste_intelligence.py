@@ -53,9 +53,9 @@ def recommend_action(row) -> str:
     if days <= 1 and spoilage_val > 200:
         return "DONATE"
     elif risk > 80:
-        return "MARKDOWN -30%"
+        return "Strategic Discount - Tier 1"
     elif 60 < risk <= 80:
-        return "MARKDOWN -10%"
+        return "Strategic Discount - Tier 2"
     elif spoilage_val > 100:
         return "RETURN to Supplier"
     else:

@@ -1,0 +1,31 @@
+item_id,item_name,category,forecasted_waste_units,forecasted_waste_value,tag,co2_saved_kg,efficiency_ratio,sustainability_score
+WME89A30,Tyson Charger 16oz,Non-Perishable,1621.0,80920.32,🚨 Top Waste Contributors,,,
+WM46E394,Heinz Shampoo 16oz,Non-Perishable,3082.0,46538.2,🚨 Top Waste Contributors,,,
+WM9B71BF,Uncle Ben's Toothpaste 16oz,Perishable,3074.0,40115.7,🚨 Top Waste Contributors,,,
+WM900B72,Campbell's Razor Blades,Perishable,2416.0,38221.12,🚨 Top Waste Contributors,,,
+WMC81E9F,Great Value Trash Bags,Perishable,3494.0,34590.6,🚨 Top Waste Contributors,,,
+WM3E23B6,Great Value Rice,Perishable,3559.0,31781.87,🚨 Top Waste Contributors,,,
+WMFD61DB,Del Monte Shampoo,Perishable,2224.0,31647.52,🚨 Top Waste Contributors,,,
+WMFAC970,Canned Pasta,Non-Perishable,2769.0,26499.33,🚨 Top Waste Contributors,,,
+WM8B4356,Del Monte Paper Towels 16oz,Perishable,1461.0,25961.97,🚨 Top Waste Contributors,,,
+WMBEA149,Campbell's Paper Towels 12oz,Perishable,1689.0,25047.87,🚨 Top Waste Contributors,,,
+WMCC4E19,Sara Lee Rolls 12oz,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM79D312,Barilla Butter,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM89D9A6,Sara Lee Detergent,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WMCE2101,Sara Lee Cereal,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM2075F6,Great Value Chicken 16oz,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM7A7EB6,Fresh Potatoes 16oz,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM51872E,Campbell's Croissants,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WMC6468C,Campbell's Chicken 16oz,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM75CEA9,Sara Lee Detergent,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WMCC153D,Great Value Rice 12oz,Perishable,,,⚠️ Inefficient Items,0.0,0.0,
+WM129980,Barilla Sauce 12oz,Perishable,,,🌍 Top CO₂ Impact Items,26303.44,,100.0
+WMC81E9F,Great Value Trash Bags,Perishable,,,🌍 Top CO₂ Impact Items,24807.4,,100.0
+WM9A1656,Heinz Sauce,Perishable,,,🌍 Top CO₂ Impact Items,21856.25,,100.0
+WMB76381,Great Value Lotion,Non-Perishable,,,🌍 Top CO₂ Impact Items,21226.28,,100.0
+WMB334EB,Organic Sauce,Perishable,,,🌍 Top CO₂ Impact Items,20481.6,,100.0
+WM8DE0AF,Del Monte Lotion,Perishable,,,🌍 Top CO₂ Impact Items,18570.0,,100.0
+WM3E23B6,Great Value Rice,Perishable,,,🌍 Top CO₂ Impact Items,17581.46,,100.0
+WM3BFC50,Canned Pasta,Non-Perishable,,,🌍 Top CO₂ Impact Items,16703.1,,100.0
+WM46E394,Heinz Shampoo 16oz,Non-Perishable,,,🌍 Top CO₂ Impact Items,16673.62,,100.0
+WM7EE87C,Kellogg's Sauce 16oz,Perishable,,,🌍 Top CO₂ Impact Items,16457.45,,100.0

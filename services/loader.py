@@ -24,7 +24,7 @@ def save_inventory(df: pd.DataFrame):
     except Exception as e:
         print(f"Error saving inventory: {e}")
 
-def load_action_log() -> pd.DataFrame:
+# def load_action_log() -> pd.DataFrame:
     """
     Load the full action log.
     """
@@ -35,3 +35,23 @@ def load_action_log() -> pd.DataFrame:
     except Exception as e:
         print(f"Error loading action log: {e}")
         return pd.DataFrame(columns=["timestamp", "item_id", "action_type", "quantity", "reason", "value"])
+def load_action_log() -> pd.DataFrame:
+    """
+    Load the full action log with schema validation.
+    """
+    expected_columns = ["timestamp", "item_id", "action_type", "quantity", "reason", "value"]
+    try:
+        df = pd.read_csv(ACTION_LOG_CSV, encoding="utf-8")
+
+        # Ensure all expected columns are present
+        for col in expected_columns:
+            if col not in df.columns:
+                df[col] = None
+
+        return df[expected_columns]
+
+    except FileNotFoundError:
+        return pd.DataFrame(columns=expected_columns)
+    except Exception as e:
+        print(f"Error loading action log: {e}")
+        return pd.DataFrame(columns=expected_columns)
