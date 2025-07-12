@@ -59,7 +59,7 @@ def estimate_all(row):
         category = get_category_defaults(row)
 
         co2_per_unit = (
-            call_climatiq_api(row) or
+            # call_climatiq_api(row) or
             row.get("carbon_score") or
             category.get("co2") or
             DEFAULTS["co2_per_unit"]
