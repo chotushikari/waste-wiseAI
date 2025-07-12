@@ -301,6 +301,7 @@ def generate_daily_decisions(df: pd.DataFrame) -> pd.DataFrame:
         tag = getattr(row, 'risk_tag', '')
         stock = getattr(row, 'current_stock', 0)
         base_price = getattr(row, 'base_price', 1)
+        dynamic_price = getattr(row, 'dynamic_price', base_price)  # Use dynamic_price
         daily_sales = max(getattr(row, 'daily_sales', 1), 1)
 
         spoilage_pct = min(1.0, spoilage_val / ((stock * base_price) + 1e-6))
@@ -308,17 +309,21 @@ def generate_daily_decisions(df: pd.DataFrame) -> pd.DataFrame:
         overstock_scores.append(round(overstock, 2))
         efficiency = co2 / (spoilage_val + 1e-6)
 
+        # Calculate markdown percentage based on dynamic_price
+        markdown_pct = ((base_price - dynamic_price) / base_price) * 100 if base_price > 0 else 0
+
+        # Tactical Notes
         # Tactical Notes
         if decision == "DONATE":
-            note = f"🔥 Donate to NGO – Save ${spoilage_val:.2f}, avoid {round(co2, 2)}kg CO₂."
-        elif decision == "MARKDOWN -30%":
-            note = f"📉 Apply -30% markdown. Waste risk: {tag}."
-        elif decision == "MARKDOWN -10%":
-            note = f"📉 Gentle markdown. Overstock + approaching expiry."
+            note = f"Action: Donate. Potential savings: ${spoilage_val:.2f}, CO₂ reduction: {round(co2, 2)}kg."
+        elif decision == "Strategic Discount - Tier 1":
+            note = f"Action: Apply Tier 1 Strategic Discount. New price: ${dynamic_price:.2f} ({markdown_pct:.1f}% reduction). Risk factor: {tag}."
+        elif decision == "Strategic Discount - Tier 2":
+            note = f"Action: Apply Tier 2 Strategic Discount. New price: ${dynamic_price:.2f} ({markdown_pct:.1f}% reduction). Addressing overstock."
         elif decision == "RETURN to Supplier":
-            note = f"↩️ Consider supplier return. Value at risk: ${spoilage_val:.2f}."
+            note = f"Action: Return to supplier. Potential loss avoided: ${spoilage_val:.2f}."
         else:
-            note = "✅ Stable – No urgent action."
+            note = "Status: Stable. No action required."
 
         # Sustainability Bonus
         if efficiency > 0.75 and co2 > 2:
